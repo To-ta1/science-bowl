@@ -12,7 +12,7 @@ RUN chmod 0755 /usr/local/bin/render-start.sh /usr/local/bin/b2_backup.py
 
 # Render supplies PORT=10000. Keep the image healthcheck aligned with that value.
 HEALTHCHECK --interval=15s --timeout=5s --start-period=90s --retries=8 \
-  CMD-SHELL node -e "const p=process.env.PORT||'10000'; fetch('http://127.0.0.1:'+p+'/health/ready').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"
+  CMD node -e "const p=process.env.PORT||'10000'; fetch('http://127.0.0.1:'+p+'/health/ready').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"
 
 USER quizdock
 EXPOSE 10000

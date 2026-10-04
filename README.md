@@ -1,3 +1,5 @@
+# QuizDock is open source, all other code and info is created by AI.
+
 # QuizDock on Render Free with Backblaze B2 persistence
 
 This repository wraps the official `fchaussin/quizdock:standalone` image with a small backup/restore layer for Render Free.

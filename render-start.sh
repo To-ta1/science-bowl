@@ -132,12 +132,17 @@ app_pid=$!
 # uses QuizDock's own qd user:set-role command after each account has signed in
 # once, avoiding reliance on the provider's role-claim format.
 # Set these Render environment variables only for the accounts you control:
+# Preferred: use OIDC subject IDs from QuizDock > My account, because some
+# providers (including some Kinde configurations) do not expose an email claim.
+#   QUIZDOCK_BOOTSTRAP_ADMIN_SUBJECT=kp_...
+#   QUIZDOCK_BOOTSTRAP_HOST_SUBJECTS=kp_host1...,kp_host2...
+# Email-based variables remain supported as a fallback when QuizDock has email:
 #   QUIZDOCK_BOOTSTRAP_ADMIN_EMAIL=you@example.com
 #   QUIZDOCK_BOOTSTRAP_HOST_EMAILS=host1@example.com,host2@example.com
 # The worker retries until the accounts exist (or its retry limit is reached).
 start_role_bootstrap() {
-  bootstrap_admin="${QUIZDOCK_BOOTSTRAP_ADMIN_EMAIL:-}"
-  bootstrap_hosts="${QUIZDOCK_BOOTSTRAP_HOST_EMAILS:-}"
+  bootstrap_admin="${QUIZDOCK_BOOTSTRAP_ADMIN_SUBJECT:-${QUIZDOCK_BOOTSTRAP_ADMIN_EMAIL:-}}"
+  bootstrap_hosts="${QUIZDOCK_BOOTSTRAP_HOST_SUBJECTS:-${QUIZDOCK_BOOTSTRAP_HOST_EMAILS:-}}"
 
   if [ -z "$bootstrap_admin" ] && [ -z "$bootstrap_hosts" ]; then
     return

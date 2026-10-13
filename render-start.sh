@@ -65,6 +65,7 @@ echo "[render] applying QuizDock migrations…"
 
 shutdown_started=0
 backup_pid=""
+role_pid=""
 app_pid=""
 
 shutdown() {
@@ -90,6 +91,9 @@ shutdown() {
 
   if [ -n "$backup_pid" ]; then
     kill "$backup_pid" 2>/dev/null || true
+  fi
+  if [ -n "$role_pid" ]; then
+    kill "$role_pid" 2>/dev/null || true
   fi
   exit 0
 }
@@ -122,6 +126,86 @@ echo "[render] starting QuizDock on :${PORT:-10000} …"
 cd /app
 node dist/main.js &
 app_pid=$!
+
+# Optional operator-managed role grants. Kinde's OIDC roles can be represented
+# as objects, while QuizDock expects an array of literal strings. This mechanism
+# uses QuizDock's own qd user:set-role command after each account has signed in
+# once, avoiding reliance on the provider's role-claim format.
+# Set these Render environment variables only for the accounts you control:
+#   QUIZDOCK_BOOTSTRAP_ADMIN_EMAIL=you@example.com
+#   QUIZDOCK_BOOTSTRAP_HOST_EMAILS=host1@example.com,host2@example.com
+# The worker retries until the accounts exist (or its retry limit is reached).
+start_role_bootstrap() {
+  bootstrap_admin="${QUIZDOCK_BOOTSTRAP_ADMIN_EMAIL:-}"
+  bootstrap_hosts="${QUIZDOCK_BOOTSTRAP_HOST_EMAILS:-}"
+
+  if [ -z "$bootstrap_admin" ] && [ -z "$bootstrap_hosts" ]; then
+    return
+  fi
+
+  if ! command -v qd >/dev/null 2>&1; then
+    echo "[render] WARNING: role bootstrap was configured, but the qd command is unavailable." >&2
+    return
+  fi
+
+  (
+    pending_admin="$bootstrap_admin"
+    pending_hosts="$bootstrap_hosts"
+    retry_seconds="${QUIZDOCK_BOOTSTRAP_ROLE_RETRY_SECONDS:-60}"
+    max_attempts="${QUIZDOCK_BOOTSTRAP_ROLE_MAX_ATTEMPTS:-1440}"
+    attempt=1
+
+    # Give the app a moment to start. The user rows are created by first login.
+    sleep 20
+    while [ "$attempt" -le "$max_attempts" ]; do
+      if ! kill -0 "$app_pid" 2>/dev/null; then
+        echo "[render] QuizDock stopped; ending role-bootstrap worker."
+        exit 0
+      fi
+
+      if [ -n "$pending_admin" ]; then
+        if qd user:set-role "$pending_admin" host,admin; then
+          echo "[render] Applied host,admin grant for configured administrator account."
+          pending_admin=""
+        else
+          echo "[render] Administrator role grant is pending; the account may need to sign in to QuizDock once."
+        fi
+      fi
+
+      if [ -n "$pending_hosts" ]; then
+        next_pending_hosts=""
+        saved_ifs="$IFS"
+        IFS=','
+        # Email addresses are expected to be comma-separated in the environment variable.
+        set -- $pending_hosts
+        IFS="$saved_ifs"
+        for host_email in "$@"; do
+          host_email="$(printf '%s' "$host_email" | sed 's/^[[:space:]]*//; s/[[:space:]]*$//')"
+          [ -n "$host_email" ] || continue
+          if qd user:set-role "$host_email" host; then
+            echo "[render] Applied host grant for a configured host account."
+          else
+            next_pending_hosts="${next_pending_hosts}${host_email},"
+          fi
+        done
+        pending_hosts="${next_pending_hosts%,}"
+      fi
+
+      if [ -z "$pending_admin" ] && [ -z "$pending_hosts" ]; then
+        echo "[render] All configured QuizDock role grants have been applied."
+        exit 0
+      fi
+
+      attempt=$((attempt + 1))
+      sleep "$retry_seconds"
+    done
+
+    echo "[render] WARNING: role bootstrap reached its retry limit. Check logs and the configured account email addresses." >&2
+  ) &
+  role_pid=$!
+}
+
+start_role_bootstrap
 
 wait "$app_pid"
 status=$?
